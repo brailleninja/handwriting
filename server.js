@@ -1,73 +1,63 @@
-const express = require('express')
-const multer = require('multer')
-const fs = require('fs')
-const fetch = require('node-fetch')
-require('dotenv').config()
+// server.js
+const express = require('express');
+const multer = require('multer');
+const fs = require('fs');
+const fetch = require('node-fetch');
+require('dotenv').config();
 
-const upload = multer({ dest: 'uploads/' })
-const app = express()
+const upload = multer({ dest: 'uploads/' });
+const app = express();
 
-// Basic health check
-app.get('/', (req, res) => {
-  res.send('Transcription server running (Render.com)')
-})
+// Allow JSON parsing for other routes if needed
+app.use(express.json());
 
-// Main endpoint to receive an image and forward to OpenAI
+// POST /api/transcribe
 app.post('/api/transcribe', upload.single('photo'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).send('No file uploaded')
+    if (!req.file) return res.status(400).send('No file uploaded.');
 
-    // Read uploaded file
-    const imagePath = req.file.path
-    const base64 = fs.readFileSync(imagePath).toString('base64')
+    const imagePath = req.file.path;
+    const buffer = fs.readFileSync(imagePath);
+    const base64 = buffer.toString('base64');
 
-    // Payload for OpenAI
+    // OpenAI API request payload
     const payload = {
       model: 'gpt-4o-mini-vision',
       input: [
         {
           role: 'system',
-          content:
-            'You are a strict assistant. When given an image of handwritten text, return ONLY the exact transcription of the handwriting as plain text. No extra commentary.'
+          content: 'You are a strict assistant. When given an image of text, return ONLY the exact transcription of the handwriting as plain text.'
         },
         {
           role: 'user',
-          content: 'Transcribe the handwriting in the attached image exactly. Return only the transcription.'
+          content: 'Transcribe the handwriting in the attached image exactly as shown. Return only the transcription, no extra text or labels.'
         },
         {
           role: 'user',
-          content: [
-            {
-              type: 'image',
-              name: 'photo.jpg',
-              data: base64
-            }
-          ]
+          content: [{ type: 'image', name: 'photo.jpg', data: base64 }]
         }
       ]
-    }
+    };
 
-    // Call OpenAI
     const openaiResp = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify(payload)
-    })
+    });
 
     if (!openaiResp.ok) {
-      const text = await openaiResp.text()
-      throw new Error('OpenAI error: ' + text)
+      const t = await openaiResp.text();
+      throw new Error('OpenAI error: ' + openaiResp.status + ' ' + t);
     }
 
-    const data = await openaiResp.json()
-
-    let transcription = ''
+    const data = await openaiResp.json();
 
     // Extract transcription
+    let transcription = '';
     try {
-      if (data.output && data.output[0] && data.output[0].content) {
-        const chunk = data.output[0].content.find(
-          c => c.type === 'output_text' || c.type === 'text'
+      if (data.output && data.output.length > 0) {
+        const first = data.output[0];
+        if (first.content && first.content.length > 0) {
