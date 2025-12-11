@@ -9,6 +9,7 @@ dotenv.config();
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
+// Allow JSON parsing
 app.use(express.json());
 
 // POST /api/transcribe
@@ -20,16 +21,17 @@ app.post('/api/transcribe', upload.single('photo'), async (req, res) => {
     const buffer = fs.readFileSync(imagePath);
     const base64 = buffer.toString('base64');
 
+    // OpenAI API payload
     const payload = {
       model: 'gpt-4o-mini-vision',
       input: [
         {
           role: 'system',
-          content: 'You are a strict assistant. Return ONLY the exact transcription of handwriting as plain text.'
+          content: 'You are a strict assistant. When given an image of text, return ONLY the exact transcription of the handwriting as plain text.'
         },
         {
           role: 'user',
-          content: 'Transcribe the handwriting in this image exactly as shown. Return only the transcription, no extra text.'
+          content: 'Transcribe the handwriting in the attached image exactly as shown. Return only the transcription, no extra text or labels.'
         },
         {
           role: 'user',
@@ -54,22 +56,28 @@ app.post('/api/transcribe', upload.single('photo'), async (req, res) => {
 
     const data = await openaiResp.json();
 
+    // Extract transcription
     let transcription = '';
     if (data.output && data.output.length > 0) {
-      const first = data.output[0];
-      if (first.content && first.content.length > 0) {
-        const textObj = first.content.find(c => c.type === 'output_text' || c.type === 'text');
-        transcription = textObj?.text || '';
-      }
+      data.output.forEach(block => {
+        if (block.type === 'output_text' && block.text) transcription += block.text + '\n';
+      });
     }
 
-    res.send(transcription || 'No text detected.');
+    res.json({ transcription: transcription.trim() });
+
+    // Cleanup uploaded file
+    fs.unlinkSync(imagePath);
 
   } catch (err) {
     console.error(err);
-    res.status(500).send('Server error: ' + err.message);
+    res.status(500).send('Error processing handwriting.');
   }
 });
 
+// Health check
+app.get('/', (req, res) => res.send('Handwriting OCR backend is running.'));
+
+// Start server
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running on port ${port}`));
