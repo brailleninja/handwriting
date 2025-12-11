@@ -61,3 +61,32 @@ app.post('/api/transcribe', upload.single('photo'), async (req, res) => {
       if (data.output && data.output.length > 0) {
         const first = data.output[0];
         if (first.content && first.content.length > 0) {
+          const textChunk = first.content.find(c => c.type === 'output_text' || c.type === 'text');
+          if (textChunk) transcription = textChunk.text || textChunk.content || '';
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse OpenAI response', e);
+    }
+
+    // Fallback
+    if (!transcription && data.output_text) transcription = data.output_text;
+    if (!transcription && data.choices && data.choices[0] && data.choices[0].message)
+      transcription = data.choices[0].message.content;
+
+    // Clean up uploaded file
+    fs.unlinkSync(imagePath);
+
+    // Return only transcription as plain text
+    res.setHeader('Content-Type', 'text/plain');
+    res.send((transcription || '').trim());
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Internal server error: ' + err.message);
+  }
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
